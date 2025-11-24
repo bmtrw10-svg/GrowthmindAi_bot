@@ -26,7 +26,7 @@ async def ai_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
         return
     rate[user_id].append(now)
 
-    # Check for "who made you" (exact or similar)
+    # Check for "who made you"
     if "who made you" in text.lower() or "who created you" in text.lower():
         await update.message.reply_text("I was made by Engineer Biruk, an Ethiopian innovator.")
         return
