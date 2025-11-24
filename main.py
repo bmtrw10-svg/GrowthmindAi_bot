@@ -1,69 +1,77 @@
 import os
-from telegram import Update, BotCommand
-from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler
+
+from telegram import Update
+from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 from openai import OpenAI
-from dotenv import load_dotenv
 
-load_dotenv()
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+PORT = int(os.environ.get("PORT", 10000))
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-BOT_MENTION = "@growthmind_ai"
+client = OpenAI(api_key=OPENAI_KEY)
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+memory = defaultdict(list)
 
-SYSTEM_PROMPT = """
-You are GrowthMind AI, a warm, professional, and encouraging AI coach.
-Specialize in business, productivity, mindset, and online growth.
-Keep replies under 3 sentences. Use 1 emoji per reply.
-Tone: confident, supportive, feminine.
-Never share links unless asked twice.
-If off-topic: 'Let’s stay focused on growth! What’s your next goal?'
-"""
+async def ai_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, chat_id: int):
+    memory[chat_id].append({"role": "user", "content": text})
+    if len(memory[chat_id]) > 5:
+        memory[chat_id] = memory[chat_id][-5:]
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Welcome to *GrowthMind AI* 🌟\n"
-        "Your 24/7 business & mindset coach\n"
-        "Tag me with @growthmind_ai + your question!\n"
-        "Example: @growthmind_ai how do I scale my side hustle?"
-    )
-
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg or not msg.text: return
-
-    text = msg.text.lower()
-    user = msg.from_user.first_name
-
-    if BOT_MENTION not in text and not (msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id):
-        return
-
-    query = msg.text.replace(BOT_MENTION, "").strip()
-    if not query:
-        await msg.reply_text(f"Hey {user}! Ask me anything about business or growth 💡")
-        return
+    msg = await update.message.reply_text("Thinking...")
 
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"{user}: {query}"}
-            ],
-            max_tokens=120,
-            temperature=0.7
+                {"role": "system", "content": "You are SuccessMind AI by Engineer Biruk — a motivational business man, chess master, athlete, and handsome leader like Alexander the Great. Give positive, inspiring vibes with Ethiopian pride. Short bullet points."}
+            ] + memory[chat_id],
+            temperature=0.7,
+            max_tokens=400
         )
-        reply = response.choices[0].message.content.strip()
-        await msg.reply_text(reply)
+        answer = response.choices[0].message.content.strip()
+        await msg.edit_text(answer or "No reply.")
+        memory[chat_id].append({"role": "assistant", "content": answer})
     except:
-        await msg.reply_text("I’m thinking… try again in a sec! ⏳")
+        await msg.edit_text("AI busy, try again.")
 
-# === RUN ===
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "*SuccessMind AI by Engineer Biruk*\n\n"
+        "• DM: Full chat\n"
+        "• Group: Mention me or /ask\n"
+        "• Made in Ethiopia 🇪🇹 with pride\n\n"
+        "Welcome! I'm SuccessMind AI — your motivational guide to success. Ask me anything, and I'll inspire you like a business titan, chess master, athlete, and handsome leader. Let's conquer together!"
+        , parse_mode="Markdown"
+    )
+
+async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        await ai_reply(update, context, " ".join(context.args), update.effective_chat.id)
+
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text or ""
+    chat = update.effective_chat
+
+    if chat.type == "private" and text.strip():
+        await ai_reply(update, context, text, chat.id)
+        return
+
+    me = await context.bot.get_me()
+    if f"@{me.username}" in text.lower():
+        clean = text.replace(f"@{me.username}", "", 1).strip()
+        if clean:
+            await ai_reply(update, context, clean, chat.id)
+
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("ask", ask))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-await app.bot.set_my_commands([BotCommand("start", "Meet your AI coach")])
 
-print("GrowthMind AI is LIVE 🚀")
-app.run_polling()
+if __name__ == "__main__":
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path="/webhook",
+        webhook_url=WEBHOOK_URL
+    )
